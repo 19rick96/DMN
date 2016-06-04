@@ -16,8 +16,7 @@ word2vec = utils.load_glove(word_vector_size)
 input_mask_mode = 'sentence'
 answer_mode = 'feedforward'
 answer_tm = 1
-task = "2"
-hops = 2
+task = "1"
 
 
 def softmax(x):
@@ -45,13 +44,7 @@ def _process_input(data_raw):
             inp = [w for w in inp if len(w) > 0]
             q = x["Q"].lower().split(' ')
             q = [w for w in q if len(w) > 0]
-            sf = x["SF"]
-	    SF = []
-	    for i in range(0,hops):
-		if i<len(sf):
-	    		SF.append(sf[i])
-		else:
-			SF.append(sf[len(sf)-1])
+
             inp_vector = [utils.process_word(word = w, 
                                         word2vec = word2vec, 
                                         vocab = vocab, 
@@ -68,7 +61,6 @@ def _process_input(data_raw):
             
             inputs.append(np.vstack(inp_vector))
             questions.append(np.vstack(q_vector))
-	    supp_fact.append(SF)
             answers.append(utils.process_word(word = x["A"], 
                                             word2vec = word2vec, 
                                             vocab = vocab, 
@@ -86,8 +78,7 @@ def _process_input(data_raw):
 	questions = np.asarray(questions)
 	answers = np.asarray(answers)
 	input_masks = np.asarray(input_masks)
-	supp_fact = np.asarray(supp_fact)
-        return inputs, questions, answers, input_masks, supp_fact
+        return inputs, questions, answers, input_masks
 
 class Layer(object):
 	def __init__(self,U,b=None,activation=None):
@@ -151,11 +142,11 @@ def gru_next_state(x_t,s_tm1,U0,W0,b0,U1,W1,b1,U2,W2,b2):
 	return s_t
 
 class DMN(object):
-	def __init__(self,hidden_dim,vocab_size,batch_size = 20,bptt_truncate=-1):
+	def __init__(self,hidden_dim,vocab_size,batch_size = 20,bptt_truncate=-1,tm=5):
 		self.hidden_dim = hidden_dim
 		self.vocab_size = vocab_size
 		self.bptt_truncate = bptt_truncate
-		self.tm = hops
+		self.tm = tm
 		self.batch_size = batch_size
 		#self.gru_p = GRUblock(hidden_dim,1)
 		self.U0_i = normal_param(std=0.1, shape=(self.hidden_dim, self.hidden_dim))
@@ -200,7 +191,6 @@ class DMN(object):
 		q = T.matrix()
 		marked = T.ivector()
 		y = T.iscalar()
-		sf = T.ivector()
 		s_p,updates = theano.scan(self.input_next_state,sequences=p,		
 						    outputs_info=T.zeros_like(self.b2_i))
 		s_q,updates = theano.scan(self.input_next_state,sequences=q,
@@ -208,13 +198,10 @@ class DMN(object):
 		c = s_p.take(marked,axis=0)
 		q_q = s_q[-1]
 		memory = [q_q.copy()]
-		gates = []
-		for iter in range(1,self.tm+1):				
-			G,current_episode = self.new_episode(c,memory[iter-1],q_q)
+		for iter in range(1,self.tm+1):
+			current_episode = self.new_episode(c,memory[iter-1],q_q)
 			app = self.em_next_state(current_episode,memory[iter-1])
 			memory.append(app)
-			gates.append(G)
-		self.gate = T.stacklists(gates)
 		last_mem = memory[-1] 
 		if answer_mode == 'feedforward':
 			self.prediction = softmax(T.dot(self.Wa, last_mem))
@@ -232,9 +219,7 @@ class DMN(object):
 		    	self.prediction = results[1][-1]
 		else:
 		    raise Exception("invalid answer_module")			
-		self.loss_ans = T.nnet.categorical_crossentropy(self.prediction.dimshuffle('x', 0), T.stack([y]))[0] 
-		self.loss_gates = T.mean(T.nnet.categorical_crossentropy(self.gate, sf))
-		self.loss_ce = (0*self.loss_ans) + self.loss_gates
+		self.loss_ce = T.nnet.categorical_crossentropy(self.prediction.dimshuffle('x', 0), T.stack([y]))[0] 
 		#another scan for batch training : sequences = data , loss gets added each step
 		self.params = [self.U0_i,self.W0_i,self.b0_i,
 				self.U1_i,self.W1_i,self.b1_i,
@@ -249,8 +234,8 @@ class DMN(object):
 							self.U_ans2,self.W_ans2,self.b_ans2]
 		#loss_ce = loss_ce + l2_reg(self.params)
 		updts = upd.adadelta(self.loss_ce,self.params)
-		self.train_fn = theano.function(inputs=[p,q,marked,y,sf],outputs=[self.prediction,self.loss_ce],updates = updts,allow_input_downcast = True)
-		self.f = theano.function([p,q,marked,y],[self.loss_ans,self.prediction])
+		self.train_fn = theano.function(inputs=[p,q,marked,y],outputs=[self.prediction,self.loss_ce],updates = updts)
+		self.f = theano.function([p,q,marked,y],[self.loss_ce,self.prediction])
 		#def save_state():
 
 	def input_next_state(self,x_t,s_tm1):
@@ -277,18 +262,24 @@ class DMN(object):
 					self.b2_em)
 		h_t = g * gru + (1 - g) * h_tm1
 		return h_t
+	
+	def step_ce(self,a,b):
+		return T.mul(b,a)
 
 	def new_episode(self,c,mem,q):
 		g, g_updates = theano.scan(fn=self.new_attn_step,
 		    sequences=c,
 		    non_sequences=[mem,q],
 		    outputs_info=T.zeros_like(c[0][0])) 
-
+		"""
 		e, e_updates = theano.scan(fn=self.new_episode_step,
 		    sequences=[c, g],
 		    outputs_info=T.zeros_like(c[0]))
+		"""
 		gs = T.nnet.softmax(g)[0]
-		return gs,e[-1]
+		w,w_updates = theano.scan(fn=self.step_ce,sequences = [gs,c],outputs_info = None)
+		e = T.sum(w,axis=0)
+		return e
 	
 	def save_params(self, file_name, epoch):
 		with open(file_name, 'w') as save_file:
@@ -309,20 +300,20 @@ class DMN(object):
 			for (x, y) in zip(self.params, loaded_params):
 				x.set_value(y)
 
-	def train(self,tr_input,tr_q,tr_ans,tr_mask,tr_sf):
+	def train(self,tr_input,tr_q,tr_ans,tr_mask):
 		l = len(tr_input)
 		print "starting..."
-		for j in range(26,100):
+		for j in range(0,50):
 			a_loss = 0.0
-			tr_input,tr_q,tr_ans,tr_mask,tr_sf = shuffle(tr_input,tr_q,tr_ans,tr_mask,tr_sf)
+			tr_input,tr_q,tr_ans,tr_mask = shuffle(tr_input,tr_q,tr_ans,tr_mask)
 			for i in range(0,l):
-				pred,loss = self.train_fn(tr_input[i],tr_q[i],tr_mask[i],tr_ans[i],tr_sf[i])
+				pred,loss = self.train_fn(tr_input[i],tr_q[i],tr_mask[i],tr_ans[i])
 				a_loss=a_loss+loss
 				print "iteration : %d , %d" %((i+1),(j+1))
 				print "loss : %.3f  average_loss : %.3f"%(loss,a_loss/(i+1))
 				print "******************"
 				if ((i+1)%10 == 0):
-					fname = 'states/DMN_ss.epoch%d' %(j)
+					fname = 'states'+task+'/DMN_ce.epoch%d' %(j)
 					self.save_params(fname,j)
 		
 	def test(self,test_inp,test_q,test_ans,test_mask):
@@ -332,7 +323,7 @@ class DMN(object):
 		y_pred = []
 		a_loss = 0
 		for i in range(0,l):
-			loss,pred = self.f(test_inp[i],test_q[i],test_mask[i],test_ans[i]) # change func.
+			loss,pred = self.f(test_inp[i],test_q[i],test_mask[i],test_ans[i])
 			a_loss = a_loss + loss
 			#print "loss : %.3f  average_loss : %.3f"%(loss,a_loss/(i+1))		
 			y_true.append(test_ans[i])
@@ -340,12 +331,12 @@ class DMN(object):
 		accuracy = sum([1 if t == p else 0 for t, p in zip(y_true, y_pred)])
 		print "accuracy: %.2f percent" % (accuracy * 100.0 / l)
 
-def shuffle(train_input,train_q,train_answer,train_input_mask,train_sf):
+def shuffle(train_input,train_q,train_answer,train_input_mask):
         print "==> Shuffling the train set"
-        combined = zip(train_input,train_q,train_answer,train_input_mask,train_sf)
+        combined = zip(train_input,train_q,train_answer,train_input_mask)
         random.shuffle(combined)
-        train_input, train_q, train_answer, train_input_mask, train_sf = zip(*combined)
-	return train_input,train_q,train_answer,train_input_mask,train_sf
+        train_input, train_q, train_answer, train_input_mask = zip(*combined)
+	return train_input,train_q,train_answer,train_input_mask
 	
 #parsing babi data
 """
@@ -362,8 +353,8 @@ print b
 #using DMN
 
 babi_train_raw, babi_test_raw = utils.get_babi_raw(task,task)
-train_input, train_q, train_answer, train_input_mask, train_sf = _process_input(babi_train_raw)
-test_input, test_q, test_answer, test_input_mask, test_sf = _process_input(babi_test_raw)
+train_input, train_q, train_answer, train_input_mask = _process_input(babi_train_raw)
+test_input, test_q, test_answer, test_input_mask = _process_input(babi_test_raw)
 vocab_size = len(vocab)
 
 a1 = train_input
@@ -371,9 +362,8 @@ a2 = train_q
 a3 = train_input_mask
 a4 = train_answer	
 dmn = DMN(word_vector_size,vocab_size)
-dmn.load_state('states/DMN_ss.epoch25')
-#theano.printing.pydotprint(dmn.loss_ans, outfile="pics/loss_ans.png", var_with_name_simple=True)
-dmn.train(a1,a2,a4,a3,train_sf)
+#dmn.train(a1,a2,a4,a3)
+dmn.load_state('states1/DMN_ce.epoch20')
 dmn.test(a1,a2,a4,a3)
 dmn.test(test_input,test_q,test_answer,test_input_mask)
 #using GRUblock

@@ -16,7 +16,7 @@ word2vec = utils.load_glove(word_vector_size)
 input_mask_mode = 'sentence'
 answer_mode = 'feedforward'
 answer_tm = 1
-task = "3"
+task = "11"
 
 
 def softmax(x):
@@ -354,8 +354,8 @@ a2 = train_q
 a3 = train_input_mask
 a4 = train_answer	
 dmn = DMN(word_vector_size,vocab_size)
-#dmn.train(a1,a2,a4,a3)
-dmn.load_state('states/state.epoch20')
+dmn.train(a1,a2,a4,a3)
+#dmn.load_state('states/state.epoch20')
 dmn.test(a1,a2,a4,a3)
 dmn.test(test_input,test_q,test_answer,test_input_mask)
 #using GRUblock

@@ -14,7 +14,6 @@ ivocab = {}
 word_vector_size = 50
 word2vec = utils.load_glove(word_vector_size)
 input_mask_mode = 'sentence'
-answer_mode = 'feedforward'
 answer_tm = 1
 task = "2"
 hops = 2
@@ -179,6 +178,16 @@ class DMN(object):
 		self.b0_em = constant_param(value=0.0, shape=(self.hidden_dim,))
 		self.b1_em = constant_param(value=0.0, shape=(self.hidden_dim,))
 		self.b2_em = constant_param(value=0.0, shape=(self.hidden_dim,))
+
+		self.U0_em2 = normal_param(std=0.1, shape=(self.hidden_dim, self.hidden_dim))
+		self.U1_em2 = normal_param(std=0.1, shape=(self.hidden_dim, self.hidden_dim))
+		self.U2_em2 = normal_param(std=0.1, shape=(self.hidden_dim, self.hidden_dim))
+		self.W0_em2 = normal_param(std=0.1, shape=(self.hidden_dim, self.hidden_dim))
+		self.W1_em2 = normal_param(std=0.1, shape=(self.hidden_dim, self.hidden_dim))
+		self.W2_em2 = normal_param(std=0.1, shape=(self.hidden_dim, self.hidden_dim))
+		self.b0_em2 = constant_param(value=0.0, shape=(self.hidden_dim,))
+		self.b1_em2 = constant_param(value=0.0, shape=(self.hidden_dim,))
+		self.b2_em2 = constant_param(value=0.0, shape=(self.hidden_dim,))
 			
 		self.W1 = normal_param(std=0.1, shape=(hidden_dim, (7*hidden_dim)+2))
 		self.W2 = normal_param(std=0.1, shape=(1,hidden_dim))
@@ -207,34 +216,16 @@ class DMN(object):
 							outputs_info=T.zeros_like(self.b2_i))
 		c = s_p.take(marked,axis=0)
 		q_q = s_q[-1]
-		memory = [q_q.copy()]
-		gates = []
-		for iter in range(1,self.tm+1):				
-			G,current_episode = self.new_episode(c,memory[iter-1],q_q)
-			app = self.em_next_state(current_episode,memory[iter-1])
-			memory.append(app)
-			gates.append(G)
-		self.gate = T.stacklists(gates)
-		last_mem = memory[-1] 
-		if answer_mode == 'feedforward':
-			self.prediction = softmax(T.dot(self.Wa, last_mem))
-		elif answer_mode == 'recurrent':
-			def answer_step(a_tm1,pred_tm1):
-				conc = T.concatenate([pred_tm1,q_q])
-				z_t = T.nnet.hard_sigmoid(self.U_ans0.dot(conc) + self.W_ans0.dot(a_tm1) + self.b_ans0)
-				r_t = T.nnet.hard_sigmoid(self.U_ans1.dot(conc) + self.W_ans1.dot(a_tm1) + self.b_ans1)
-	    			h_t = T.tanh(self.U_ans2.dot(conc) + self.W_ans2.dot(a_tm1 * r_t) + self.b_ans2)
-	    			s_t = (T.ones_like(z_t) - z_t) * h_t + z_t * a_tm1
-				pred = softmax(T.dot(self.Wa,s_t))
-				return [s_t,pred]
-			dummy = theano.shared(np.zeros((self.vocab_size, ), dtype=theano.config.floatX))
-		    	results, updates = theano.scan(fn=answer_step,outputs_info=[last_mem, T.zeros_like(dummy)],n_steps=answer_tm)
-		    	self.prediction = results[1][-1]
-		else:
-		    raise Exception("invalid answer_module")			
+		
+		epm,epm_updates = theano.scan(fn = self.step_em,non_sequences=[c,q_q], outputs_info=[None,q_q.copy()],n_steps=self.tm) 
+		last_mem = epm[1][-1]
+		self.gate = epm[0] 
+		pred = T.nnet.softmax(T.dot(self.Wa,last_mem))[0]
+		results,r_updates = theano.scan(self.answer_step,non_sequences=[q_q],outputs_info=[last_mem,pred],n_steps=answer_tm)		
+		self.prediction = results[1][-1]	
 		self.loss_ans = T.nnet.categorical_crossentropy(self.prediction.dimshuffle('x', 0), T.stack([y]))[0] 
 		self.loss_gates = T.mean(T.nnet.categorical_crossentropy(self.gate, sf))
-		self.loss_ce = (0*self.loss_ans) + self.loss_gates
+		self.loss_ce = (self.loss_ans) + self.loss_gates
 		#another scan for batch training : sequences = data , loss gets added each step
 		self.params = [self.U0_i,self.W0_i,self.b0_i,
 				self.U1_i,self.W1_i,self.b1_i,
@@ -243,15 +234,12 @@ class DMN(object):
 				self.U1_em,self.W1_em,self.b1_em,
 				self.U2_em,self.W2_em,self.b2_em,
 				self.W1,self.W2,self.b1,self.b2,self.Wa,self.Wb]
-		if answer_mode == 'recurrent':
-			self.params = self.params + [self.U_ans0,self.W_ans0,self.b_ans0,
-							self.U_ans1,self.W_ans1,self.b_ans1,
+		self.params = self.params + [self.U_ans0,self.W_ans0,self.b_ans0,self.U_ans1,self.W_ans1,self.b_ans1,
 							self.U_ans2,self.W_ans2,self.b_ans2]
 		#loss_ce = loss_ce + l2_reg(self.params)
 		updts = upd.adadelta(self.loss_ce,self.params)
 		self.train_fn = theano.function(inputs=[p,q,marked,y,sf],outputs=[self.prediction,self.loss_ce],updates = updts,allow_input_downcast = True)
 		self.f = theano.function([p,q,marked,y],[self.loss_ans,self.prediction])
-		#def save_state():
 
 	def input_next_state(self,x_t,s_tm1):
 		s_t = gru_next_state(x_t,s_tm1,self.U0_i,self.W0_i,self.b0_i,self.U1_i,self.W1_i,self.b1_i,self.U2_i,self.W2_i,self.b2_i)
@@ -273,8 +261,8 @@ class DMN(object):
 		return g
 
 	def new_episode_step(self,c_t,g,h_tm1):
-		gru = gru_next_state(c_t,h_tm1,self.U0_em,self.W0_em,self.b0_em,self.U1_em,self.W1_em,self.b1_em,self.U2_em,self.W2_em,
-					self.b2_em)
+		gru = gru_next_state(c_t,h_tm1,self.U0_em2,self.W0_em2,self.b0_em2,self.U1_em2,self.W1_em2,self.b1_em2,self.U2_em2,self.W2_em2,
+					self.b2_em2)
 		h_t = g * gru + (1 - g) * h_tm1
 		return h_t
 
@@ -287,9 +275,21 @@ class DMN(object):
 		e, e_updates = theano.scan(fn=self.new_episode_step,
 		    sequences=[c, g],
 		    outputs_info=T.zeros_like(c[0]))
+
 		gs = T.nnet.softmax(g)[0]
 		return gs,e[-1]
-	
+
+	def step_em(self,m_tm1,c,q):
+		G,current_episode = self.new_episode(c,m_tm1,q)
+		m_t = self.em_next_state(current_episode,m_tm1)
+		return G,m_t
+
+	def answer_step(self,a_tm1,pred_tm1,q):
+		conc = T.concatenate([pred_tm1,q])
+		a_t = gru_next_state(conc,a_tm1,self.U_ans0,self.W_ans0,self.b_ans0,self.U_ans1,self.W_ans1,self.b_ans1,self.U_ans2, self.W_ans2,self.b_ans2)
+		pred = T.nnet.softmax(T.dot(self.Wa,a_t))[0]
+		return a_t,pred
+
 	def save_params(self, file_name, epoch):
 		with open(file_name, 'w') as save_file:
 		    pickle.dump(
@@ -312,7 +312,7 @@ class DMN(object):
 	def train(self,tr_input,tr_q,tr_ans,tr_mask,tr_sf):
 		l = len(tr_input)
 		print "starting..."
-		for j in range(26,100):
+		for j in range(0,100):
 			a_loss = 0.0
 			tr_input,tr_q,tr_ans,tr_mask,tr_sf = shuffle(tr_input,tr_q,tr_ans,tr_mask,tr_sf)
 			for i in range(0,l):
@@ -322,7 +322,7 @@ class DMN(object):
 				print "loss : %.3f  average_loss : %.3f"%(loss,a_loss/(i+1))
 				print "******************"
 				if ((i+1)%10 == 0):
-					fname = 'states/DMN_ss.epoch%d' %(j)
+					fname = 'states2/DMN_scan.epoch%d' %(j)
 					self.save_params(fname,j)
 		
 	def test(self,test_inp,test_q,test_ans,test_mask):
@@ -371,7 +371,7 @@ a2 = train_q
 a3 = train_input_mask
 a4 = train_answer	
 dmn = DMN(word_vector_size,vocab_size)
-dmn.load_state('states/DMN_ss.epoch25')
+#dmn.load_state('states/DMN_scan.epoch29')
 #theano.printing.pydotprint(dmn.loss_ans, outfile="pics/loss_ans.png", var_with_name_simple=True)
 dmn.train(a1,a2,a4,a3,train_sf)
 dmn.test(a1,a2,a4,a3)
