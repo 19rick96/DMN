@@ -46,20 +46,24 @@ def new_attn_step(c_t,g_tm1,m_im1,q):
 	l_1 = T.dot(W1, z) + b1
 	l_1 = T.tanh(l_1)
 	l_2 = T.dot(W2,l_1) + b2
-	g = T.nnet.sigmoid(l_2)[0]
-	return g
+	#g = T.nnet.sigmoid(l_2)[0]
+	return l_2[0]
 
 def new_episode_step(c_t,g,h_tm1):
 	gru = gru_next_state(c_t,h_tm1,U0_em,W0_em,b0_em,U1_em,W1_em,b1_em,U2_em,W2_em,b2_em)
 	h_t = g * gru + (1 - g) * h_tm1
 	return h_t
 
+def step_ce(a,b):
+		return T.mul(b,a)
+
 def new_episode(c,mem,q):
 	g, g_updates = theano.scan(fn=new_attn_step,sequences=c,non_sequences=[mem,q],outputs_info=T.zeros_like(c[0][0])) 
-
+	gs = T.nnet.softmax(g)[0]
 	e, e_updates = theano.scan(fn=new_episode_step,sequences=[c, g],outputs_info=T.zeros_like(c[0]))
 
-	gs = T.nnet.softmax(g)[0]
+	#w,w_updates = theano.scan(fn=step_ce,sequences = [gs,c],outputs_info = None)
+	#e = T.sum(w,axis=0)
 	return gs,e[-1]
 c_t = T.matrix()
 q_q = T.vector()
@@ -82,8 +86,8 @@ c = T.matrix()
 q_q = T.vector()
 epm,epm_updates = theano.scan(fn = step_em,non_sequences=[c,q_q], outputs_info=[None,T.zeros_like(q_q)],n_steps=3)
 f = theano.function([c,q_q],epm[0])
-g = theano.function([c,q_q],epm[1])"""
-
+g = theano.function([c,q_q],epm[1])
+"""
 a = [[0.418, 0.24968, -0.41242, 0.1217, 0.34527, -0.044457],
 	[0.013441, 0.23682, -0.16899, 0.40951, 0.63812, 0.47709],
 	[0.33042, 0.24995, -0.60874, 0.10923, 0.036372, 0.151],

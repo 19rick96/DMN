@@ -14,9 +14,9 @@ ivocab = {}
 word_vector_size = 50
 word2vec = utils.load_glove(word_vector_size)
 input_mask_mode = 'sentence'
-answer_tm = 1
-task = "2"
-hops = 2
+answer_tm = 3
+task = "3"
+hops = 3
 m = 0.02
 
 
@@ -125,16 +125,6 @@ class DMN(object):
 		self.b0_em = constant_param(value=0.0, shape=(self.hidden_dim,))
 		self.b1_em = constant_param(value=0.0, shape=(self.hidden_dim,))
 		self.b2_em = constant_param(value=0.0, shape=(self.hidden_dim,))
-
-		self.U0_em2 = normal_param(std=m, shape=(self.hidden_dim, self.hidden_dim))
-		self.U1_em2 = normal_param(std=m, shape=(self.hidden_dim, self.hidden_dim))
-		self.U2_em2 = normal_param(std=m, shape=(self.hidden_dim, self.hidden_dim))
-		self.W0_em2 = normal_param(std=m, shape=(self.hidden_dim, self.hidden_dim))
-		self.W1_em2 = normal_param(std=m, shape=(self.hidden_dim, self.hidden_dim))
-		self.W2_em2 = normal_param(std=m, shape=(self.hidden_dim, self.hidden_dim))
-		self.b0_em2 = constant_param(value=0.0, shape=(self.hidden_dim,))
-		self.b1_em2 = constant_param(value=0.0, shape=(self.hidden_dim,))
-		self.b2_em2 = constant_param(value=0.0, shape=(self.hidden_dim,))
 			
 		self.W1 = normal_param(std=0.0028, shape=(5*hidden_dim, (7*hidden_dim)+2))
 		self.W2 = normal_param(std=0.04, shape=(1,5*hidden_dim))
@@ -181,9 +171,6 @@ class DMN(object):
 				self.U0_em,self.W0_em,self.b0_em,
 				self.U1_em,self.W1_em,self.b1_em,
 				self.U2_em,self.W2_em,self.b2_em,
-				self.U0_em2,self.W0_em2,self.b0_em2,
-				self.U1_em2,self.W1_em2,self.b1_em2,
-				self.U2_em2,self.W2_em2,self.b2_em2,
 				self.W1,self.W2,self.b1,self.b2,self.Wb]
 		self.params = self.params + [self.U_ans0,self.W_ans0,self.b_ans0,self.U_ans1,self.W_ans1,self.b_ans1,
 							self.U_ans2,self.W_ans2,self.b_ans2,self.Wa]
@@ -208,14 +195,10 @@ class DMN(object):
 		l_1 = T.dot(self.W1, z) + self.b1
 		l_1 = T.tanh(l_1)
 		l_2 = T.dot(self.W2,l_1) + self.b2
-		#g = T.nnet.sigmoid(l_2)[0]
 		return l_2[0]
 
-	def new_episode_step(self,c_t,g,h_tm1):
-		gru = gru_next_state(c_t,h_tm1,self.U0_em2,self.W0_em2,self.b0_em2,self.U1_em2,self.W1_em2,self.b1_em2,self.U2_em2,self.W2_em2,
-					self.b2_em2)
-		h_t = g * gru + (1 - g) * h_tm1
-		return h_t
+	def step_ce(self,a,b):
+		return T.mul(b,a)
 
 	def new_episode(self,c,mem,q):
 		g, g_updates = theano.scan(fn=self.new_attn_step,
@@ -224,12 +207,11 @@ class DMN(object):
 		    outputs_info=T.zeros_like(c[0][0])) 
 
 		gs = T.nnet.softmax(g)[0]
+	
+		w,w_updates = theano.scan(fn=self.step_ce,sequences = [gs,c],outputs_info = None)
+		e = T.sum(w,axis=0)
 
-		e, e_updates = theano.scan(fn=self.new_episode_step,
-		    sequences=[c, gs],
-		    outputs_info=T.zeros_like(c[0]))
-
-		return gs,e[-1]
+		return gs,e
 
 	def step_em(self,m_tm1,c,q):
 		G,current_episode = self.new_episode(c,m_tm1,q)
@@ -264,7 +246,7 @@ class DMN(object):
 	def train(self,tr_input,tr_q,tr_ans,tr_mask,tr_sf):
 		l = len(tr_input)
 		print "starting..."
-		for j in range(0,120):
+		for j in range(0,100):
 			a_loss = 0.0
 			tr_input,tr_q,tr_ans,tr_mask,tr_sf = shuffle(tr_input,tr_q,tr_ans,tr_mask,tr_sf)
 			for i in range(0,l):
@@ -274,7 +256,7 @@ class DMN(object):
 				print "loss : %.3f  average_loss : %.3f"%(loss,a_loss/(i+1))
 				print "******************"
 				if ((i+1)%10 == 0):
-					fname = 'states2/DMN_scan2.epoch%d' %(j)
+					fname = 'states_orig/states'+task+'/DMN_orig.epoch%d' %(j)
 					self.save_params(fname,j)
 		
 	def test(self,test_inp,test_q,test_ans,test_mask):
@@ -284,9 +266,8 @@ class DMN(object):
 		y_pred = []
 		a_loss = 0
 		for i in range(0,l):
-			loss,pred = self.f(test_inp[i],test_q[i],test_mask[i],test_ans[i]) # change func.
-			a_loss = a_loss + loss
-			#print "loss : %.3f  average_loss : %.3f"%(loss,a_loss/(i+1))		
+			loss,pred = self.f(test_inp[i],test_q[i],test_mask[i],test_ans[i]) 
+			a_loss = a_loss + loss		
 			y_true.append(test_ans[i])
 			y_pred.append(pred.argmax(axis=0))
 		accuracy = sum([1 if t == p else 0 for t, p in zip(y_true, y_pred)])
@@ -299,20 +280,6 @@ def shuffle(train_input,train_q,train_answer,train_input_mask,train_sf):
         train_input, train_q, train_answer, train_input_mask, train_sf = zip(*combined)
 	return train_input,train_q,train_answer,train_input_mask,train_sf
 	
-#parsing babi data
-"""
-babi_train_raw, babi_test_raw = utils.get_babi_raw("1","1")
-train_input, train_q, train_answer, train_input_mask = _process_input(babi_train_raw)
-a = train_input[1]
-print len(train_input)
-print len(a)
-print len(a[0])
-b = train_answer[0]
-print len(train_answer)
-print b
-"""
-#using DMN
-
 babi_train_raw, babi_test_raw = utils.get_babi_raw(task,task)
 train_input, train_q, train_answer, train_input_mask, train_sf = _process_input(babi_train_raw)
 test_input, test_q, test_answer, test_input_mask, test_sf = _process_input(babi_test_raw)
@@ -323,42 +290,11 @@ a2 = train_q
 a3 = train_input_mask
 a4 = train_answer	
 dmn = DMN(word_vector_size,vocab_size)
-dmn.load_state('states2/DMN_scan2.epoch15')
-"""
-for i in range(0,5):
-	a = dmn.shit(train_input[i],train_q[i],train_input_mask[i])
-	print train_sf[i]
-	print a
-	print "***************************"
-"""
-#theano.printing.pydotprint(dmn.loss_ans, outfile="pics/loss_ans.png", var_with_name_simple=True)
-#dmn.train(a1,a2,a4,a3,train_sf)
+dmn.load_state('states_orig/states3/DMN_orig.epoch19')
+dmn.train(a1,a2,a4,a3,train_sf)
 dmn.test(a1,a2,a4,a3)
 dmn.test(test_input,test_q,test_answer,test_input_mask)
-#using GRUblock
-"""
-x = T.ivector()
-bptt_truncate = -1
-dim = 8
-gru1 = GRUblock(dim)
-[o,s],updates = theano.scan(gru1.calc_next_state,sequences = x,truncate_gradient=bptt_truncate,
-       			    outputs_info=[None,dict(initial=T.zeros(dim))])
-f = theano.function([x],s,allow_input_downcast=True)
-X = np.array([0,3,4,2,0])
-a = f(X)
-print a[2]
-"""
-#using Layer
-"""
-x = T.ivector()
-U = np.matrix([[1,2,3],[4,5,6]])
-b = np.array([1,1])
-l1 = Layer(U,b)
-y = l1.output(x)
-f = theano.function([x],y)
-a = f([1,1,1])	
-print a	
-"""
+
 
 
 
