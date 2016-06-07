@@ -2,7 +2,7 @@
 
 Includes codes for Dynamic Memory Networks, a variant of neural networks incorporating an attention mechanism to produce episodic memory. The aim of this project is to create a bot version of APJ Abdul Kalam, so that coming generation can know about him in an interactive manner. This bot should be able to answer questions written in natural language by a user and give factual answers by understanding the question.
 
-The code in DMN_orig.py is that of a fully supervised DMN as given in the research paper (still requires a few small modeifications)  : 
+The code in DMN_orig.py is that of a fully supervised DMN as given in the research paper (still requires a few small modifications)  : 
 " http://arxiv.org/pdf/1506.07285v5.pdf "
 
 The results obtained are as follows : 
