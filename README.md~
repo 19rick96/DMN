@@ -33,4 +33,6 @@ As of now, regularization has not been used for training but shall be incorporat
 My codes don't give expected values for tasks - 2, 3, 7, 8.  
 Tasks 17 and 19 are still open problems.
 
+(Versions of DMN other than DMN_orig.py were made while trying to make the original version as given in the paper only to carry out a few tests and gain insights. They have a lot of discrepancies and are in no way any improvements)
+ 
 Necessary modifications in codes, advises and reasons for the poor performance in the above 6 tasks are more than welcome.
