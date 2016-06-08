@@ -11,7 +11,7 @@ Task 1 : 100 %
 
 Task 2 : 85 %
 
-Task 3 : 69 %
+Task 3 : 75 %
 
 Task 4 : 100 %
 
