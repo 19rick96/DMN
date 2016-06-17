@@ -11,7 +11,7 @@ Task 1 : 100 %
 
 Task 2 : 85 %
 
-Task 3 : 69 %
+Task 3 : 75 %
 
 Task 4 : 100 %
 
@@ -49,9 +49,26 @@ Task 10 : 100 %
 
 As of now, regularization has not been used for training but shall be incorporated in future to improve results. Also the number of episodes produced (analogous to memory hops in MemNN) have been kept contant at 3 except for tasks 7,8 where it is kept at 7. The future codes should be able to produce the required no. of episodes automatically. 
 
-My codes don't give expected values for tasks - 2, 3, 7, 8.  
+My codes don't give expected values for tasks - 2, 3, 7, 10.  
 Tasks 17 and 19 are still open problems.
 
 (Versions of DMN other than DMN_orig.py were made while trying to make the original version as given in the paper only to carry out a few tests and gain insights. They have a lot of discrepancies and are in no way any improvements)
- 
+
+Further I slightly modified the DMN to do binary classification of question-answer pairs. I removed the answer module and the episodic memory module. So essentially I have a GRU unit to encode both the question and answer in a pair. Then I combined the attention mechanism which basically is a MLP to judge whether the candidate sentence answers the question. The model gives about 90% accuracy on the WikiQA dataset. 
+The implementation is given by the file "DMN_ans_loc.py"  
+
 Necessary modifications in codes, advises and reasons for the poor performance in the above 6 tasks are more than welcome.
+
+
+
+
+
+
+
+
+
+
+
+
+
+

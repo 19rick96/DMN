@@ -15,7 +15,7 @@ word_vector_size = 50
 word2vec = utils.load_glove(word_vector_size)
 input_mask_mode = 'sentence'
 answer_tm = 3
-task = "9"
+task = "7"
 hops = 3
 m = 0.02
 
@@ -290,8 +290,8 @@ a2 = train_q
 a3 = train_input_mask
 a4 = train_answer	
 dmn = DMN(word_vector_size,vocab_size)
-#dmn.load_state('states_orig/states3/DMN_orig.epoch19')
-dmn.train(a1,a2,a4,a3,train_sf)
+dmn.load_state('states_orig/states7/DMN_orig.epoch20')
+#dmn.train(a1,a2,a4,a3,train_sf)
 dmn.test(a1,a2,a4,a3)
 dmn.test(test_input,test_q,test_answer,test_input_mask)
 
