@@ -1,0 +1,7 @@
+initial pearson score : 0.106577
+final pearson score : 0.586743
+***************************************
+
+TEST VALUE : pearson score : 0.528303
+***************************************
+
