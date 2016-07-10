@@ -54,9 +54,6 @@ Tasks 17 and 19 are still open problems.
 
 (Versions of DMN other than DMN_orig.py were made while trying to make the original version as given in the paper only to carry out a few tests and gain insights. They have a lot of discrepancies and are in no way any improvements)
 
-Further I slightly modified the DMN to do binary classification of question-answer pairs. I removed the answer module and the episodic memory module. So essentially I have a GRU unit to encode both the question and answer in a pair. Then I combined the attention mechanism which basically is a MLP to judge whether the candidate sentence answers the question. The model gives about 90% accuracy on the WikiQA dataset. 
-The implementation is given by the file "DMN_ans_loc.py"  
-
 Necessary modifications in codes, advises and reasons for the poor performance in the above 6 tasks are more than welcome.
 
 
